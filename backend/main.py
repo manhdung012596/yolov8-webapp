@@ -19,7 +19,7 @@ app.add_middleware(
 )
 
 # Load YOLOv8 model
-model = YOLO("yolov8n.pt")
+model = YOLO("yolov8s.pt")
 
 @app.get("/")
 def read_root():
@@ -45,7 +45,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 # Run inference
-                results = model(frame)
+                results = model(frame, conf=0.5)
                 
                 detections = []
                 for r in results:
