@@ -1,14 +1,14 @@
 <template>
   <div class="container">
-    <h1>YOLOv8 Object Detection (Vietnamese)</h1>
+    <h1>Nhận Diện Vật Thể YOLOv8</h1>
     <div class="video-container">
       <video ref="video" autoplay playsinline muted @loadedmetadata="onVideoLoaded"></video>
       <canvas ref="canvas"></canvas>
     </div>
     <div class="status">
-      <p>Status: {{ status }}</p>
+      <p>Trạng thái: {{ status }}</p>
       <p>FPS: {{ fps }}</p>
-      <button @click="toggleDetection">{{ isDetecting ? 'Stop' : 'Start' }} Detection</button>
+      <button @click="toggleDetection">{{ isDetecting ? 'Dừng' : 'Bắt đầu' }} Nhận diện</button>
     </div>
   </div>
 </template>
@@ -19,7 +19,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 const config = useRuntimeConfig()
 const video = ref(null)
 const canvas = ref(null)
-const status = ref('Initializing...')
+const status = ref('Đang khởi tạo...')
 const isDetecting = ref(false)
 const fps = ref(0)
 let ws = null
@@ -30,14 +30,102 @@ const SPEAK_COOLDOWN = 3000 // 3 seconds between speaking same object
 
 const detectedObjects = new Set()
 
+// Vietnamese translation dictionary
+const vnDict = {
+  'person': 'người',
+  'bicycle': 'xe đạp',
+  'car': 'ô tô',
+  'motorcycle': 'xe máy',
+  'airplane': 'máy bay',
+  'bus': 'xe buýt',
+  'train': 'tàu hỏa',
+  'truck': 'xe tải',
+  'boat': 'thuyền',
+  'traffic light': 'đèn giao thông',
+  'fire hydrant': 'vòi cứu hỏa',
+  'stop sign': 'biển báo dừng',
+  'parking meter': 'đồng hồ đỗ xe',
+  'bench': 'ghế đá',
+  'bird': 'chim',
+  'cat': 'mèo',
+  'dog': 'chó',
+  'horse': 'ngựa',
+  'sheep': 'cừu',
+  'cow': 'bò',
+  'elephant': 'voi',
+  'bear': 'gấu',
+  'zebra': 'ngựa vằn',
+  'giraffe': 'hươu cao cổ',
+  'backpack': 'ba lô',
+  'umbrella': 'ô',
+  'handbag': 'túi xách',
+  'tie': 'cà vạt',
+  'suitcase': 'vali',
+  'frisbee': 'đĩa bay',
+  'skis': 'ván trượt tuyết',
+  'snowboard': 'ván trượt tuyết',
+  'sports ball': 'bóng thể thao',
+  'kite': 'diều',
+  'baseball bat': 'gậy bóng chày',
+  'baseball glove': 'găng tay bóng chày',
+  'skateboard': 'ván trượt',
+  'surfboard': 'ván lướt sóng',
+  'tennis racket': 'vợt tennis',
+  'bottle': 'chai',
+  'wine glass': 'ly rượu',
+  'cup': 'cốc',
+  'fork': 'nĩa',
+  'knife': 'dao',
+  'spoon': 'thìa',
+  'bowl': 'bát',
+  'banana': 'chuối',
+  'apple': 'táo',
+  'sandwich': 'bánh mì kẹp',
+  'orange': 'cam',
+  'broccoli': 'súp lơ',
+  'carrot': 'cà rốt',
+  'hot dog': 'xúc xích',
+  'pizza': 'bánh pizza',
+  'donut': 'bánh donut',
+  'cake': 'bánh ngọt',
+  'chair': 'ghế',
+  'couch': 'ghế sofa',
+  'potted plant': 'cây cảnh',
+  'bed': 'giường',
+  'dining table': 'bàn ăn',
+  'toilet': 'nhà vệ sinh',
+  'tv': 'ti vi',
+  'laptop': 'máy tính xách tay',
+  'mouse': 'chuột máy tính',
+  'remote': 'điều khiển từ xa',
+  'keyboard': 'bàn phím',
+  'cell phone': 'điện thoại',
+  'microwave': 'lò vi sóng',
+  'oven': 'lò nướng',
+  'toaster': 'máy nướng bánh mì',
+  'sink': 'bồn rửa',
+  'refrigerator': 'tủ lạnh',
+  'book': 'sách',
+  'clock': 'đồng hồ',
+  'vase': 'bình hoa',
+  'scissors': 'kéo',
+  'teddy bear': 'gấu bông',
+  'hair drier': 'máy sấy tóc',
+  'toothbrush': 'bàn chải đánh răng'
+}
+
+const getVietnameseName = (className) => {
+  return vnDict[className] || className
+}
+
 const connectWebSocket = () => {
-  status.value = 'Connecting to server...'
+  status.value = 'Đang kết nối đến máy chủ...'
   // Use runtime config for backend URL
   const backendUrl = config.public.backendUrl
   ws = new WebSocket(`${backendUrl}/ws`)
 
   ws.onopen = () => {
-    status.value = 'Connected'
+    status.value = 'Đã kết nối'
   }
 
   ws.onmessage = (event) => {
@@ -49,13 +137,13 @@ const connectWebSocket = () => {
   }
 
   ws.onclose = () => {
-    status.value = 'Disconnected. Retrying...'
+    status.value = 'Đã ngắt kết nối. Đang thử lại...'
     setTimeout(connectWebSocket, 1000)
   }
 
   ws.onerror = (error) => {
     console.error('WebSocket error:', error)
-    status.value = 'Error connecting'
+    status.value = 'Lỗi kết nối'
   }
 }
 
@@ -71,7 +159,7 @@ const startCamera = async () => {
     video.value.srcObject = stream
   } catch (err) {
     console.error('Error accessing camera:', err)
-    status.value = 'Camera error: ' + err.message
+    status.value = 'Lỗi camera: ' + err.message
   }
 }
 
@@ -110,7 +198,8 @@ const drawDetections = (detections) => {
   
   detections.forEach(det => {
     const [x1, y1, x2, y2] = det.bbox
-    const label = `${det.class} (${(det.conf * 100).toFixed(1)}%)`
+    const vnName = getVietnameseName(det.class)
+    const label = `${vnName} (${(det.conf * 100).toFixed(1)}%)`
     
     ctx.strokeStyle = '#00FF00'
     ctx.lineWidth = 2
@@ -136,100 +225,12 @@ const handleTTS = (detections) => {
     confidentDetections.sort((a, b) => b.conf - a.conf)
     
     const topObj = confidentDetections[0]
-    const text = getVietnameseText(topObj.class)
+    const vnName = getVietnameseName(topObj.class)
+    const text = `Có ${vnName} phía trước`
     
     speak(text)
     lastSpeakTime = now
   }
-}
-
-const getVietnameseText = (className) => {
-  // Map common COCO classes to Vietnamese
-  const dict = {
-    'person': 'người',
-    'bicycle': 'xe đạp',
-    'car': 'ô tô',
-    'motorcycle': 'xe máy',
-    'airplane': 'máy bay',
-    'bus': 'xe buýt',
-    'train': 'tàu hỏa',
-    'truck': 'xe tải',
-    'boat': 'thuyền',
-    'traffic light': 'đèn giao thông',
-    'fire hydrant': 'vòi cứu hỏa',
-    'stop sign': 'biển báo dừng',
-    'parking meter': 'đồng hồ đỗ xe',
-    'bench': 'ghế đá',
-    'bird': 'chim',
-    'cat': 'mèo',
-    'dog': 'chó',
-    'horse': 'ngựa',
-    'sheep': 'cừu',
-    'cow': 'bò',
-    'elephant': 'voi',
-    'bear': 'gấu',
-    'zebra': 'ngựa vằn',
-    'giraffe': 'hươu cao cổ',
-    'backpack': 'ba lô',
-    'umbrella': 'ô',
-    'handbag': 'túi xách',
-    'tie': 'cà vạt',
-    'suitcase': 'vali',
-    'frisbee': 'đĩa bay',
-    'skis': 'ván trượt tuyết',
-    'snowboard': 'ván trượt tuyết',
-    'sports ball': 'bóng thể thao',
-    'kite': 'diều',
-    'baseball bat': 'gậy bóng chày',
-    'baseball glove': 'găng tay bóng chày',
-    'skateboard': 'ván trượt',
-    'surfboard': 'ván lướt sóng',
-    'tennis racket': 'vợt tennis',
-    'bottle': 'chai',
-    'wine glass': 'ly rượu',
-    'cup': 'cốc',
-    'fork': 'nĩa',
-    'knife': 'dao',
-    'spoon': 'thìa',
-    'bowl': 'bát',
-    'banana': 'chuối',
-    'apple': 'táo',
-    'sandwich': 'bánh mì kẹp',
-    'orange': 'cam',
-    'broccoli': 'súp lơ',
-    'carrot': 'cà rốt',
-    'hot dog': 'xúc xích',
-    'pizza': 'bánh pizza',
-    'donut': 'bánh donut',
-    'cake': 'bánh ngọt',
-    'chair': 'ghế',
-    'couch': 'ghế sofa',
-    'potted plant': 'cây cảnh',
-    'bed': 'giường',
-    'dining table': 'bàn ăn',
-    'toilet': 'nhà vệ sinh',
-    'tv': 'ti vi',
-    'laptop': 'máy tính xách tay',
-    'mouse': 'chuột máy tính',
-    'remote': 'điều khiển từ xa',
-    'keyboard': 'bàn phím',
-    'cell phone': 'điện thoại',
-    'microwave': 'lò vi sóng',
-    'oven': 'lò nướng',
-    'toaster': 'máy nướng bánh mì',
-    'sink': 'bồn rửa',
-    'refrigerator': 'tủ lạnh',
-    'book': 'sách',
-    'clock': 'đồng hồ',
-    'vase': 'bình hoa',
-    'scissors': 'kéo',
-    'teddy bear': 'gấu bông',
-    'hair drier': 'máy sấy tóc',
-    'toothbrush': 'bàn chải đánh răng'
-  }
-  
-  const vnName = dict[className] || className
-  return `Có ${vnName} phía trước`
 }
 
 const speak = (text) => {
