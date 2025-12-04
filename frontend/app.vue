@@ -233,10 +233,29 @@ const handleTTS = (detections) => {
   }
 }
 
+const voices = ref([])
+
+const loadVoices = () => {
+  voices.value = window.speechSynthesis.getVoices()
+}
+
 const speak = (text) => {
   if ('speechSynthesis' in window) {
+    console.log('Speaking:', text) // Debug log
+    window.speechSynthesis.cancel() // Stop previous
+
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = 'vi-VN'
+    
+    // Explicitly find a Vietnamese voice
+    const vnVoice = voices.value.find(v => v.lang.includes('vi'))
+    if (vnVoice) {
+      utterance.voice = vnVoice
+      console.log('Using voice:', vnVoice.name)
+    } else {
+      console.warn('No Vietnamese voice found, using default.')
+    }
+
     window.speechSynthesis.speak(utterance)
   }
 }
@@ -263,6 +282,12 @@ const loop = () => {
 onMounted(() => {
   startCamera()
   connectWebSocket()
+  
+  // Load voices
+  if ('speechSynthesis' in window) {
+    loadVoices()
+    window.speechSynthesis.onvoiceschanged = loadVoices
+  }
 })
 
 onUnmounted(() => {
