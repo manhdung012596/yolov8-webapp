@@ -19,7 +19,7 @@ app.add_middleware(
 )
 
 # Load YOLOv8 model
-model = YOLO("yolov8s.pt")
+model = YOLO("yolov8n.pt")
 
 @app.get("/")
 def read_root():

@@ -215,9 +215,6 @@ const handleTTS = (detections) => {
   const now = Date.now()
   if (now - lastSpeakTime < SPEAK_COOLDOWN) return
 
-  // Simple logic: speak the highest confidence object or new objects
-  // For now, let's just speak the first detected object that is reasonably confident
-  
   const confidentDetections = detections.filter(d => d.conf > 0.6)
   
   if (confidentDetections.length > 0) {
@@ -225,8 +222,26 @@ const handleTTS = (detections) => {
     confidentDetections.sort((a, b) => b.conf - a.conf)
     
     const topObj = confidentDetections[0]
-    const vnName = getVietnameseName(topObj.class)
-    const text = `Có ${vnName} phía trước`
+    let text = ""
+
+    // Check proximity (if object height is > 70% of screen height)
+    let isClose = false
+    if (canvas.value) {
+      const h = canvas.value.height
+      const [x1, y1, x2, y2] = topObj.bbox
+      const objHeight = y2 - y1
+      if (objHeight > h * 0.7) {
+        isClose = true
+      }
+    }
+
+    if (isClose) {
+      text = "Vật cản rất gần"
+    } else if (topObj.class === 'person') {
+      text = "Có người phía trước"
+    } else {
+      text = "Có vật cản phía trước"
+    }
     
     speak(text)
     lastSpeakTime = now
