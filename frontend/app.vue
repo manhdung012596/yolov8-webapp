@@ -26,7 +26,7 @@ let ws = null
 let animationId = null
 let lastTime = 0
 let lastSpeakTime = 0
-const SPEAK_COOLDOWN = 3000 // 3 seconds between speaking same object
+const SPEAK_COOLDOWN = 2500 // 2.5 seconds between speaking same object
 
 const detectedObjects = new Set()
 
@@ -214,8 +214,9 @@ const drawDetections = (detections) => {
 const handleTTS = (detections) => {
   const now = Date.now()
   if (now - lastSpeakTime < SPEAK_COOLDOWN) return
+  if (!isDetecting.value) return
 
-  const confidentDetections = detections.filter(d => d.conf > 0.6)
+  const confidentDetections = detections.filter(d => d.conf > 0.45)
   
   if (confidentDetections.length > 0) {
     // Sort by confidence
@@ -279,6 +280,10 @@ const toggleDetection = () => {
   isDetecting.value = !isDetecting.value
   if (isDetecting.value) {
     loop()
+  } else {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+    }
   }
 }
 
@@ -286,7 +291,7 @@ const loop = () => {
   if (!isDetecting.value) return
   
   const now = Date.now()
-  if (now - lastTime >= 100) { // Limit to ~10 FPS sending
+  if (now - lastTime >= 50) { // Limit to ~20 FPS sending
     sendFrame()
     lastTime = now
   }
