@@ -26,7 +26,7 @@ let ws = null
 let animationId = null
 let lastTime = 0
 let lastSpeakTime = 0
-const SPEAK_COOLDOWN = 3000 // 3 seconds between speaking same object
+const SPEAK_COOLDOWN = 2500 // 2.5 seconds between speaking same object
 
 const detectedObjects = new Set()
 
@@ -214,29 +214,64 @@ const drawDetections = (detections) => {
 const handleTTS = (detections) => {
   const now = Date.now()
   if (now - lastSpeakTime < SPEAK_COOLDOWN) return
+  if (!isDetecting.value) return
 
-  // Simple logic: speak the highest confidence object or new objects
-  // For now, let's just speak the first detected object that is reasonably confident
-  
-  const confidentDetections = detections.filter(d => d.conf > 0.6)
+  const confidentDetections = detections.filter(d => d.conf > 0.45)
   
   if (confidentDetections.length > 0) {
     // Sort by confidence
     confidentDetections.sort((a, b) => b.conf - a.conf)
     
     const topObj = confidentDetections[0]
-    const vnName = getVietnameseName(topObj.class)
-    const text = `Có ${vnName} phía trước`
+    let text = ""
+
+    // Check proximity (if object height is > 70% of screen height)
+    let isClose = false
+    if (canvas.value) {
+      const h = canvas.value.height
+      const [x1, y1, x2, y2] = topObj.bbox
+      const objHeight = y2 - y1
+      if (objHeight > h * 0.7) {
+        isClose = true
+      }
+    }
+
+    if (isClose) {
+      text = "Vật cản rất gần"
+    } else if (topObj.class === 'person') {
+      text = "Có người phía trước"
+    } else {
+      text = "Có vật cản phía trước"
+    }
     
     speak(text)
     lastSpeakTime = now
   }
 }
 
+const voices = ref([])
+
+const loadVoices = () => {
+  voices.value = window.speechSynthesis.getVoices()
+}
+
 const speak = (text) => {
   if ('speechSynthesis' in window) {
+    console.log('Speaking:', text) // Debug log
+    window.speechSynthesis.cancel() // Stop previous
+
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = 'vi-VN'
+    
+    // Explicitly find a Vietnamese voice
+    const vnVoice = voices.value.find(v => v.lang.includes('vi'))
+    if (vnVoice) {
+      utterance.voice = vnVoice
+      console.log('Using voice:', vnVoice.name)
+    } else {
+      console.warn('No Vietnamese voice found, using default.')
+    }
+
     window.speechSynthesis.speak(utterance)
   }
 }
@@ -245,6 +280,10 @@ const toggleDetection = () => {
   isDetecting.value = !isDetecting.value
   if (isDetecting.value) {
     loop()
+  } else {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+    }
   }
 }
 
@@ -252,7 +291,7 @@ const loop = () => {
   if (!isDetecting.value) return
   
   const now = Date.now()
-  if (now - lastTime >= 100) { // Limit to ~10 FPS sending
+  if (now - lastTime >= 50) { // Limit to ~20 FPS sending
     sendFrame()
     lastTime = now
   }
@@ -263,6 +302,12 @@ const loop = () => {
 onMounted(() => {
   startCamera()
   connectWebSocket()
+  
+  // Load voices
+  if ('speechSynthesis' in window) {
+    loadVoices()
+    window.speechSynthesis.onvoiceschanged = loadVoices
+  }
 })
 
 onUnmounted(() => {
