@@ -45,7 +45,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 # Run inference
-                results = model(frame, conf=0.4)
+                results = model(frame, conf=0.4, imgsz=320)
                 
                 detections = []
                 for r in results:
