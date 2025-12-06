@@ -38,7 +38,7 @@ let animationId = null
 let lastTime = 0
 let lastSpeakTime = 0
 const SPEAK_COOLDOWN = 2500 // 2.5 seconds between speaking same object
-const audioCache = new Map()
+
 
 const detectedObjects = new Set()
 const lastObjectHeight = ref(0)
@@ -201,7 +201,7 @@ const sendFrame = () => {
   const offCtx = offscreenCanvas.getContext('2d')
   offCtx.drawImage(video.value, 0, 0, offscreenCanvas.width, offscreenCanvas.height)
   
-  const base64 = offscreenCanvas.toDataURL('image/jpeg', 0.6) // Quality 0.6
+  const base64 = offscreenCanvas.toDataURL('image/jpeg', 0.5) // Reduced quality 0.5 for speed
   ws.send(base64)
 }
 
@@ -321,16 +321,8 @@ const selectedVoiceURI = ref('')
 const loadVoices = () => {
   const allVoices = window.speechSynthesis.getVoices()
   
-  // Create online voice option
-  const onlineVoice = {
-      name: 'Google Vietnamese (Online)',
-      lang: 'vi-VN',
-      voiceURI: 'online-vi-vn',
-      localService: false
-  }
-
-  // Sort: Vietnamese first (including online), then English, then others
-  voices.value = [onlineVoice, ...allVoices].sort((a, b) => { // Always put online voice or native VN voice first
+  // Sort: Vietnamese first, then others
+  voices.value = [...allVoices].sort((a, b) => { // Always put native VN voice first
     const aVi = a.lang.includes('vi')
     const bVi = b.lang.includes('vi')
     if (aVi && !bVi) return -1
@@ -340,35 +332,18 @@ const loadVoices = () => {
 
   // Auto-select Vietnamese voice if available and not yet selected
   if (!selectedVoiceURI.value) {
-     // Prefer native if exists, else online
-    const vnVoice = voices.value.find(v => v.lang.includes('vi') && v.voiceURI !== 'online-vi-vn')
+     // Prefer native if exists
+    const vnVoice = voices.value.find(v => v.lang.includes('vi'))
     if (vnVoice) {
       selectedVoiceURI.value = vnVoice.voiceURI
-    } else {
-      selectedVoiceURI.value = 'online-vi-vn' // Fallback to online
+    } else if (voices.value.length > 0) {
+      selectedVoiceURI.value = voices.value[0].voiceURI
     }
   }
 }
 
 const speak = (text) => {
   console.log('Speaking:', text)
-
-  // Handle Online Voice
-  if (selectedVoiceURI.value === 'online-vi-vn') {
-      if (audioCache.has(text)) {
-          const cachedAudio = audioCache.get(text)
-          cachedAudio.currentTime = 0 // Reset to start
-          cachedAudio.play().catch(e => console.error("Cached audio play error:", e))
-      } else {
-          const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=vi&client=tw-ob`
-          const audio = new Audio(url)
-          audio.onloadeddata = () => {
-              audioCache.set(text, audio)
-          }
-          audio.play().catch(e => console.error("Audio play error:", e))
-      }
-      return
-  }
 
   // Handle Native Speech Synthesis
   if ('speechSynthesis' in window) {
@@ -399,6 +374,16 @@ const speak = (text) => {
 const toggleDetection = () => {
   isDetecting.value = !isDetecting.value
   if (isDetecting.value) {
+    // Unlock Audio Context immediately on interaction
+    if ('speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance('')
+        window.speechSynthesis.speak(utterance)
+        
+        // Also try to resume if suspended (Chrome policy)
+        if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume()
+        }
+    }
     loop()
   } else {
     if ('speechSynthesis' in window) {
