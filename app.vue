@@ -451,18 +451,17 @@ onUnmounted(() => {
 .video-container {
   position: relative;
   width: 640px;
-  height: 480px;
+  /* Let height be determined by the video content */
+  /* height: 480px; */ 
   background: #000;
   margin-bottom: 20px;
 }
 
 video {
-  position: absolute;
-  top: 0;
-  left: 0;
+  position: relative; /* Change from absolute to relative */
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto; /* Maintain aspect ratio */
+  display: block;
 }
 
 canvas {
