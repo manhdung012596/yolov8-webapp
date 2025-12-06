@@ -44,8 +44,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 if frame is None:
                     continue
 
-                # Run inference
-                results = model(frame, conf=0.4, imgsz=640)
+                # Run inference with tracking
+                # persist=True is important for tracking across frames
+                results = model.track(frame, conf=0.4, imgsz=640, persist=True)
                 
                 detections = []
                 for r in results:
