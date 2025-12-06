@@ -189,20 +189,19 @@ const sendFrame = () => {
   if (!isDetecting.value || !ws || ws.readyState !== WebSocket.OPEN || !video.value || !canvas.value) return
 
   const ctx = canvas.value.getContext('2d')
-  // Draw video frame to canvas for processing (or use a separate offscreen canvas)
-  // Here we just use the visible canvas to capture the frame, but we'll overwrite it with boxes later
-  // To avoid flickering, ideally use an offscreen canvas, but for simplicity:
   
   const offscreenCanvas = document.createElement('canvas')
-  // Resize to 320px width for faster transmission and processing
-  const scale = 320 / video.value.videoWidth
-  offscreenCanvas.width = 320
+  // Resize to 640px width for better accuracy
+  // Keep aspect ratio
+  const targetWidth = 640
+  const scale = targetWidth / video.value.videoWidth
+  offscreenCanvas.width = targetWidth
   offscreenCanvas.height = video.value.videoHeight * scale
   
   const offCtx = offscreenCanvas.getContext('2d')
   offCtx.drawImage(video.value, 0, 0, offscreenCanvas.width, offscreenCanvas.height)
   
-  const base64 = offscreenCanvas.toDataURL('image/jpeg', 0.5) // Quality 0.5
+  const base64 = offscreenCanvas.toDataURL('image/jpeg', 0.6) // Quality 0.6
   ws.send(base64)
 }
 
@@ -211,21 +210,39 @@ const drawDetections = (detections) => {
   // Clear previous drawings
   ctx.clearRect(0, 0, canvas.value.width, canvas.value.height)
   
-  // We don't need to draw the video again if the video element is visible behind the canvas
-  // Just draw boxes
+  // Calculate scale factor between current canvas logic (video size) and analysis size (640px width)
+  // Analysis width was 640. Current video width is video.value.videoWidth
   
+  // Actually, wait. The current implementation of backend returns coordinates based on the INPUT IMAGE size (which we sent as 640px wide).
+  // But we are drawing on a canvas that matches the full video resolution.
+  // So we need to scale FROM 640px TO videoWidth.
+  
+  const analysisWidth = 640
+  // Analysis height was calculated: videoHeight * (640 / videoWidth)
+  const analysisHeight = video.value.videoHeight * (640 / video.value.videoWidth)
+
+  const scaleX = canvas.value.width / analysisWidth
+  const scaleY = canvas.value.height / analysisHeight
+
   detections.forEach(det => {
-    const [x1, y1, x2, y2] = det.bbox
+    let [x1, y1, x2, y2] = det.bbox
+    
+    // Apply scaling
+    x1 *= scaleX
+    y1 *= scaleY
+    x2 *= scaleX
+    y2 *= scaleY
+
     const vnName = getVietnameseName(det.class)
     const label = `${vnName} (${(det.conf * 100).toFixed(1)}%)`
     
     ctx.strokeStyle = '#00FF00'
-    ctx.lineWidth = 2
+    ctx.lineWidth = 3 // Thicker line
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
     
     ctx.fillStyle = '#00FF00'
-    ctx.font = '16px Arial'
-    ctx.fillText(label, x1, y1 - 5)
+    ctx.font = 'bold 20px Arial' // Bigger font
+    ctx.fillText(label, x1, y1 - 10)
   })
 }
 
