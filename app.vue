@@ -8,6 +8,17 @@
     <div class="status">
       <p>Trạng thái: {{ status }}</p>
       <p>FPS: {{ fps }}</p>
+      <div class="control-group">
+        <label>Chọn giọng đọc ({{ voices.length }}):</label>
+        <div class="select-wrapper">
+          <select v-model="selectedVoiceURI">
+            <option v-for="voice in voices" :key="voice.voiceURI" :value="voice.voiceURI">
+              {{ voice.name }} ({{ voice.lang }})
+            </option>
+          </select>
+          <button class="icon-btn" @click="loadVoices" title="Tải lại danh sách giọng">↻</button>
+        </div>
+      </div>
       <button @click="toggleDetection">{{ isDetecting ? 'Dừng' : 'Bắt đầu' }} Nhận diện</button>
     </div>
   </div>
@@ -27,8 +38,12 @@ let animationId = null
 let lastTime = 0
 let lastSpeakTime = 0
 const SPEAK_COOLDOWN = 2500 // 2.5 seconds between speaking same object
+const audioCache = new Map()
 
 const detectedObjects = new Set()
+const lastObjectHeight = ref(0)
+const lastObjectClass = ref('')
+
 
 // Vietnamese translation dictionary
 const vnDict = {
@@ -174,17 +189,19 @@ const sendFrame = () => {
   if (!isDetecting.value || !ws || ws.readyState !== WebSocket.OPEN || !video.value || !canvas.value) return
 
   const ctx = canvas.value.getContext('2d')
-  // Draw video frame to canvas for processing (or use a separate offscreen canvas)
-  // Here we just use the visible canvas to capture the frame, but we'll overwrite it with boxes later
-  // To avoid flickering, ideally use an offscreen canvas, but for simplicity:
   
   const offscreenCanvas = document.createElement('canvas')
-  offscreenCanvas.width = video.value.videoWidth
-  offscreenCanvas.height = video.value.videoHeight
-  const offCtx = offscreenCanvas.getContext('2d')
-  offCtx.drawImage(video.value, 0, 0)
+  // Resize to 640px width for better accuracy
+  // Keep aspect ratio
+  const targetWidth = 640
+  const scale = targetWidth / video.value.videoWidth
+  offscreenCanvas.width = targetWidth
+  offscreenCanvas.height = video.value.videoHeight * scale
   
-  const base64 = offscreenCanvas.toDataURL('image/jpeg', 0.5) // Quality 0.5
+  const offCtx = offscreenCanvas.getContext('2d')
+  offCtx.drawImage(video.value, 0, 0, offscreenCanvas.width, offscreenCanvas.height)
+  
+  const base64 = offscreenCanvas.toDataURL('image/jpeg', 0.6) // Quality 0.6
   ws.send(base64)
 }
 
@@ -193,83 +210,186 @@ const drawDetections = (detections) => {
   // Clear previous drawings
   ctx.clearRect(0, 0, canvas.value.width, canvas.value.height)
   
-  // We don't need to draw the video again if the video element is visible behind the canvas
-  // Just draw boxes
+  // Calculate scale factor between current canvas logic (video size) and analysis size (640px width)
+  // Analysis width was 640. Current video width is video.value.videoWidth
   
+  // Actually, wait. The current implementation of backend returns coordinates based on the INPUT IMAGE size (which we sent as 640px wide).
+  // But we are drawing on a canvas that matches the full video resolution.
+  // So we need to scale FROM 640px TO videoWidth.
+  
+  const analysisWidth = 640
+  // Analysis height was calculated: videoHeight * (640 / videoWidth)
+  const analysisHeight = video.value.videoHeight * (640 / video.value.videoWidth)
+
+  const scaleX = canvas.value.width / analysisWidth
+  const scaleY = canvas.value.height / analysisHeight
+
   detections.forEach(det => {
-    const [x1, y1, x2, y2] = det.bbox
+    let [x1, y1, x2, y2] = det.bbox
+    
+    // Apply scaling
+    x1 *= scaleX
+    y1 *= scaleY
+    x2 *= scaleX
+    y2 *= scaleY
+
     const vnName = getVietnameseName(det.class)
     const label = `${vnName} (${(det.conf * 100).toFixed(1)}%)`
     
     ctx.strokeStyle = '#00FF00'
-    ctx.lineWidth = 2
+    ctx.lineWidth = 3 // Thicker line
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
     
     ctx.fillStyle = '#00FF00'
-    ctx.font = '16px Arial'
-    ctx.fillText(label, x1, y1 - 5)
+    ctx.font = 'bold 20px Arial' // Bigger font
+    ctx.fillText(label, x1, y1 - 10)
   })
 }
 
 const handleTTS = (detections) => {
   const now = Date.now()
-  if (now - lastSpeakTime < SPEAK_COOLDOWN) return
-  if (!isDetecting.value) return
+  
+  if (!isDetecting.value) {
+    lastObjectHeight.value = 0
+    lastObjectClass.value = ''
+    return
+  }
 
   const confidentDetections = detections.filter(d => d.conf > 0.45)
   
   if (confidentDetections.length > 0) {
-    // Sort by confidence
-    confidentDetections.sort((a, b) => b.conf - a.conf)
+    // Sort by confidence (or size - likely the closest object is largest)
+    // Heuristic: largest box detected ~ closest object
+    confidentDetections.sort((a, b) => {
+        const hA = a.bbox[3] - a.bbox[1]
+        const hB = b.bbox[3] - b.bbox[1]
+        return hB - hA
+    })
     
     const topObj = confidentDetections[0]
+    const [x1, y1, x2, y2] = topObj.bbox
+    const currentHeight = y2 - y1
+    const currentClass = topObj.class
+
+    // Calculate percentage change if it's the same object class
+    let percentChange = 0
+    if (lastObjectClass.value === currentClass && lastObjectHeight.value > 0) {
+      percentChange = (currentHeight - lastObjectHeight.value) / lastObjectHeight.value
+    }
+
+    // Logic:
+    // 1. New object detected (or class changed) -> Speak immediately
+    // 2. Same object, but got closer by > 5% -> Speak warning
+    
+    let shouldSpeak = false
     let text = ""
 
-    // Check proximity (if object height is > 70% of screen height)
-    let isClose = false
-    if (canvas.value) {
-      const h = canvas.value.height
-      const [x1, y1, x2, y2] = topObj.bbox
-      const objHeight = y2 - y1
-      if (objHeight > h * 0.7) {
-        isClose = true
-      }
+    if (currentClass !== lastObjectClass.value) {
+      // New object logic
+      shouldSpeak = true
+      text = `Phát hiện ${getVietnameseName(currentClass)}`
+      
+      // Update reference
+      lastObjectClass.value = currentClass
+      lastObjectHeight.value = currentHeight
+    } else {
+        // Same object logic
+        if (percentChange > 0.05) {
+            // Moved closer by 5%
+            shouldSpeak = true
+            text = `Cảnh báo, ${getVietnameseName(currentClass)} đang lại gần`
+            
+            // Update reference to this new closer position so we don't spam unless it gets even closer
+            lastObjectHeight.value = currentHeight
+        }
     }
 
-    if (isClose) {
-      text = "Vật cản rất gần"
-    } else if (topObj.class === 'person') {
-      text = "Có người phía trước"
-    } else {
-      text = "Có vật cản phía trước"
+    if (shouldSpeak && (now - lastSpeakTime > 1000)) { // 1s minimal cooldown to prevent absolute chaos
+        speak(text)
+        lastSpeakTime = now
     }
-    
-    speak(text)
-    lastSpeakTime = now
+  } else {
+    // No detections, reset tracking
+    lastObjectHeight.value = 0
+    lastObjectClass.value = ''
   }
 }
 
 const voices = ref([])
+const selectedVoiceURI = ref('')
 
 const loadVoices = () => {
-  voices.value = window.speechSynthesis.getVoices()
+  const allVoices = window.speechSynthesis.getVoices()
+  
+  // Create online voice option
+  const onlineVoice = {
+      name: 'Google Vietnamese (Online)',
+      lang: 'vi-VN',
+      voiceURI: 'online-vi-vn',
+      localService: false
+  }
+
+  // Sort: Vietnamese first (including online), then English, then others
+  voices.value = [onlineVoice, ...allVoices].sort((a, b) => { // Always put online voice or native VN voice first
+    const aVi = a.lang.includes('vi')
+    const bVi = b.lang.includes('vi')
+    if (aVi && !bVi) return -1
+    if (!aVi && bVi) return 1
+    return 0
+  })
+
+  // Auto-select Vietnamese voice if available and not yet selected
+  if (!selectedVoiceURI.value) {
+     // Prefer native if exists, else online
+    const vnVoice = voices.value.find(v => v.lang.includes('vi') && v.voiceURI !== 'online-vi-vn')
+    if (vnVoice) {
+      selectedVoiceURI.value = vnVoice.voiceURI
+    } else {
+      selectedVoiceURI.value = 'online-vi-vn' // Fallback to online
+    }
+  }
 }
 
 const speak = (text) => {
+  console.log('Speaking:', text)
+
+  // Handle Online Voice
+  if (selectedVoiceURI.value === 'online-vi-vn') {
+      if (audioCache.has(text)) {
+          const cachedAudio = audioCache.get(text)
+          cachedAudio.currentTime = 0 // Reset to start
+          cachedAudio.play().catch(e => console.error("Cached audio play error:", e))
+      } else {
+          const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=vi&client=tw-ob`
+          const audio = new Audio(url)
+          audio.onloadeddata = () => {
+              audioCache.set(text, audio)
+          }
+          audio.play().catch(e => console.error("Audio play error:", e))
+      }
+      return
+  }
+
+  // Handle Native Speech Synthesis
   if ('speechSynthesis' in window) {
-    console.log('Speaking:', text) // Debug log
     window.speechSynthesis.cancel() // Stop previous
 
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.lang = 'vi-VN'
     
-    // Explicitly find a Vietnamese voice
-    const vnVoice = voices.value.find(v => v.lang.includes('vi'))
-    if (vnVoice) {
-      utterance.voice = vnVoice
-      console.log('Using voice:', vnVoice.name)
-    } else {
-      console.warn('No Vietnamese voice found, using default.')
+    // Use selected voice
+    if (selectedVoiceURI.value) {
+      const voice = voices.value.find(v => v.voiceURI === selectedVoiceURI.value)
+      if (voice) {
+        utterance.voice = voice
+        console.log('Using voice:', voice.name)
+      }
+    }
+
+    // Fallback if no voice selected (should unlikely happen with our new logic)
+    if (!utterance.voice) {
+         const vnVoice = voices.value.find(v => v.lang.includes('vi'))
+         if (vnVoice) utterance.voice = vnVoice
     }
 
     window.speechSynthesis.speak(utterance)
@@ -356,6 +476,33 @@ canvas {
 
 .status {
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+
+.control-group {
+  margin: 10px 0;
+}
+
+.select-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+select {
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  max-width: 200px;
+}
+
+.icon-btn {
+  padding: 5px 10px;
+  background: #2196F3;
+  margin-left: 0;
 }
 
 button {
